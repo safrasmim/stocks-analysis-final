@@ -1,0 +1,7 @@
+.mc-wrap { overflow-x: auto; }
+.mc-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+.mc-table th { background: #667eea; color: white; padding: 0.8rem 1rem; text-align: center; }
+.mc-table td { padding: 0.75rem 1rem; text-align: center; border-bottom: 1px solid #e2e8f0; }
+.mc-table tr:hover td { background: #f7fafc; }
+.model-name { font-weight: 600; text-align: left; color: #2d3748; }
+.best-cell { background: #c6f6d5 !important; font-weight: 700; color: #22543d; }

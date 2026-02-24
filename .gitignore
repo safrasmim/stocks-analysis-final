@@ -1,0 +1,60 @@
+# =========================
+# 🔹 Python / FastAPI
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# virtual environments
+venv/
+env/
+.venv/
+
+# distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# logs
+*.log
+
+# environment variables
+.env
+.env.*
+
+# =========================
+# 🔹 Node / React
+# =========================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# React build output (IMPORTANT)
+build/
+dist/
+
+# Next/Vite cache (safe to ignore)
+.next/
+.vite/
+
+# =========================
+# 🔹 IDE / OS
+# =========================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# =========================
+# 🔹 Jupyter (if any)
+# =========================
+.ipynb_checkpoints/
