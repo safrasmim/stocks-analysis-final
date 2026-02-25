@@ -16,6 +16,7 @@ import joblib
 import numpy as np
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class Predictor:
         self._ensemble  = None
         self._lda       = None
         self._lda_dict  = None
+        self._macro_df  = None
         self._loaded    = False
 
     def load(self):
@@ -98,6 +100,16 @@ class Predictor:
             except Exception as e:
                 errors.append(f"LDA: {e}")
 
+        # Macro data (optional, but used when available for realistic inference)
+        try:
+            from src.config import DATA_DIR
+            from src.features.macro import load_macro_data
+            self._macro_df = load_macro_data(DATA_DIR / "macro_indicators.csv")
+            logger.info("Macro indicators loaded: %d rows", len(self._macro_df))
+        except Exception as e:
+            logger.warning("Macro data not loaded (non-fatal): %s", e)
+            self._macro_df = None
+
         if errors:
             for err in errors:
                 logger.warning("Load warning: %s", err)
@@ -112,27 +124,46 @@ class Predictor:
     def models_loaded(self) -> bool:
         return self._loaded and (self._rf is not None or self._xgb is not None)
 
-    def _extract_features(self, texts: List[str], ticker: str = "") -> np.ndarray:
+    def _extract_features(
+        self,
+        texts: List[str],
+        ticker: str = "",
+        event_dates: Optional[List[str]] = None,
+    ) -> np.ndarray:
         import pandas as pd
         from src.features.feature_engineering import extract_all_features, get_feature_matrix
+
+        if event_dates and len(event_dates) == len(texts):
+            dates = event_dates
+        else:
+            dates = [datetime.utcnow().strftime("%Y-%m-%d")] * len(texts)
 
         df = pd.DataFrame({
             "text":   texts,
             "ticker": [ticker] * len(texts),
-            "date":   ["2026-01-01"] * len(texts),
+            "date":   dates,
             "label":  [0] * len(texts),
         })
-        df_feat = extract_all_features(df, lda_model=self._lda,
-                                       lda_dict=self._lda_dict,
-                                       model_dir=self.model_dir)
+        df_feat = extract_all_features(
+            df,
+            macro_df=self._macro_df,
+            lda_model=self._lda,
+            lda_dict=self._lda_dict,
+            model_dir=self.model_dir,
+        )
         return get_feature_matrix(df_feat)
 
-    def predict(self, texts: List[str], ticker: str = "",
-                model: str = "ensemble") -> Dict[str, Any]:
+    def predict(
+        self,
+        texts: List[str],
+        ticker: str = "",
+        model: str = "ensemble",
+        event_dates: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         if not self.models_loaded():
             raise RuntimeError("Models not loaded. Call .load() first.")
 
-        X           = self._extract_features(texts, ticker)
+        X = self._extract_features(texts, ticker, event_dates=event_dates)
         model_lower = model.lower()
 
         if model_lower in ("ensemble", "auto"):

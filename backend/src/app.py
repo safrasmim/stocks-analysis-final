@@ -32,6 +32,7 @@ import csv
 import json
 from pathlib import Path
 from typing import List, Optional, Dict, Any
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -107,15 +108,6 @@ TICKER_KEYWORDS: Dict[str, List[str]] = {
     "7030": ["zain"],
 }
 
-# Hardcoded fallback metrics — your real evaluation results
-FALLBACK_METRICS = [
-    {"model": "Random Forest", "accuracy": 0.8194, "precision": 0.8201, "recall": 0.8194, "f1_score": 0.8194, "roc_auc": 0.8714},
-    {"model": "XGBoost",       "accuracy": 0.8028, "precision": 0.8035, "recall": 0.8028, "f1_score": 0.8028, "roc_auc": 0.8577},
-    {"model": "Ensemble",      "accuracy": 0.8167, "precision": 0.8172, "recall": 0.8167, "f1_score": 0.8167, "roc_auc": 0.8662},
-    {"model": "LSTM",          "accuracy": 0.5417, "precision": 0.5312, "recall": 0.5417, "f1_score": 0.5348, "roc_auc": 0.5842},
-    {"model": "Baseline",      "accuracy": 0.5083, "precision": 0.2583, "recall": 0.5000, "f1_score": 0.3399, "roc_auc": 0.5000},
-]
-
 
 def _mismatch_warning(headline: str, ticker: str) -> Optional[str]:
     h_lower      = headline.lower()
@@ -135,6 +127,15 @@ def _mismatch_warning(headline: str, ticker: str) -> Optional[str]:
     return None
 
 
+def _signal_from_probability(prob_up: float) -> str:
+    """Convert probability to investor-facing signal."""
+    if prob_up >= 0.55:
+        return "BULLISH"
+    if prob_up <= 0.45:
+        return "BEARISH"
+    return "NEUTRAL"
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PYDANTIC SCHEMAS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -149,14 +150,23 @@ class PredictRequest(BaseModel):
     ticker:     str
     headlines:  Optional[List[str]] = None
     news_texts: Optional[List[str]] = None
-    model:      Optional[str]       = "ensemble"
-    model_type: Optional[str]       = None
+    model:       Optional[str]       = "ensemble"
+    model_type:  Optional[str]       = None
+    event_date:  Optional[str]       = None
+    event_dates: Optional[List[str]] = None
 
     def get_texts(self) -> List[str]:
         return self.headlines or self.news_texts or []
 
     def get_model(self) -> str:
         return self.model_type or self.model or "ensemble"
+
+    def get_event_dates(self, n_texts: int) -> List[str]:
+        if self.event_dates and len(self.event_dates) == n_texts:
+            return self.event_dates
+        if self.event_date:
+            return [self.event_date] * n_texts
+        return [datetime.utcnow().strftime("%Y-%m-%d")] * n_texts
 
     class Config:
         json_schema_extra = {"example": {
@@ -169,6 +179,7 @@ class PredictRequest(BaseModel):
 class HeadlineResult(BaseModel):
     headline:       str
     prediction:     str
+    signal:         str
     confidence:     float
     probability_up: float
     warning:        Optional[str] = None
@@ -190,6 +201,7 @@ class BatchPredictItem(BaseModel):
     ticker:         str
     company:        str
     prediction:     str
+    signal:         str
     confidence:     float
     probability_up: float
 
@@ -212,6 +224,7 @@ class BroadcastStockResult(BaseModel):
     name:           str
     sector:         str
     direction:      str
+    signal:         str
     confidence:     float
     probability_up: float
 
@@ -266,8 +279,7 @@ async def get_ticker(ticker: str):
 async def get_metrics():
     """
     Return FULL evaluation metrics: accuracy, precision, recall, f1_score, roc_auc.
-    Priority: JSON file → CSV file → hardcoded fallback.
-    Always returns a populated list so the frontend never shows dashes.
+    Priority: JSON file → CSV file.
     """
     json_path = DATA_DIR / "evaluation" / "evaluation_metrics.json"
     csv_path  = DATA_DIR / "evaluation" / "evaluation_metrics.csv"
@@ -303,13 +315,13 @@ async def get_metrics():
         except Exception as e:
             logger.warning("Could not read metrics CSV: %s", e)
 
-    # ── 3. Hardcoded fallback — always populated, never shows dashes ───────────
+    # ── 3. No fallback in production/research mode ───────────────────────────
     return {
         "available": False,
-        "source":    "fallback",
-        "message":   "Run evaluate_all_models.py to generate live metrics.",
-        "metrics":   FALLBACK_METRICS,
-        "count":     len(FALLBACK_METRICS),
+        "source":    "none",
+        "message":   "Evaluation metrics are unavailable. Run: python scripts/evaluate_all_models.py",
+        "metrics":   [],
+        "count":     0,
     }
 
 
@@ -330,20 +342,27 @@ async def predict(request: PredictRequest):
     if not texts:
         raise HTTPException(status_code=400, detail="Provide headlines or news_texts (non-empty list).")
 
-    model_name            = request.get_model()
+    model_name = request.get_model()
+    event_dates = request.get_event_dates(len(texts))
     results: List[HeadlineResult] = []
 
-    for headline in texts:
+    for headline, event_date in zip(texts, event_dates):
         if not headline.strip():
             continue
         try:
-            pred       = predictor.predict(texts=[headline], ticker=request.ticker, model=model_name)
+            pred = predictor.predict(
+                texts=[headline],
+                ticker=request.ticker,
+                model=model_name,
+                event_dates=[event_date],
+            )
             prob_up    = float(pred["probabilities_up"][0])
             direction  = "UP" if pred["predictions"][0] == 1 else "DOWN"
             confidence = round((prob_up if direction == "UP" else 1 - prob_up) * 100, 1)
             results.append(HeadlineResult(
                 headline       = headline,
                 prediction     = direction,
+                signal         = _signal_from_probability(prob_up),
                 confidence     = confidence,
                 probability_up = round(prob_up, 4),
                 warning        = _mismatch_warning(headline, request.ticker),
@@ -353,6 +372,7 @@ async def predict(request: PredictRequest):
             results.append(HeadlineResult(
                 headline       = headline,
                 prediction     = "UNKNOWN",
+                signal         = "NEUTRAL",
                 confidence     = 0.0,
                 probability_up = 0.0,
                 warning        = f"Prediction error: {str(e)}",
@@ -388,6 +408,7 @@ async def predict_batch(request: BatchPredictRequest):
                 ticker         = ticker,
                 company        = TICKER_NAMES.get(ticker, ticker),
                 prediction     = direction,
+                signal         = _signal_from_probability(prob_up),
                 confidence     = confidence,
                 probability_up = round(prob_up, 4),
             ))
@@ -418,6 +439,7 @@ async def predict_broadcast(request: BroadcastRequest):
                 name           = info["name"],
                 sector         = info["sector"],
                 direction      = direction,
+                signal         = _signal_from_probability(prob_up),
                 confidence     = confidence,
                 probability_up = round(prob_up, 4),
             ))

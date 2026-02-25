@@ -25,11 +25,26 @@ def _generate_synthetic_macro() -> pd.DataFrame:
 
 def add_macro_features(df: pd.DataFrame, macro_df: pd.DataFrame, date_col: str = "date") -> pd.DataFrame:
     df = df.copy()
-    df[date_col]        = pd.to_datetime(df[date_col])
-    macro_df            = macro_df.copy()
-    macro_df["mk"]      = macro_df["date"].dt.to_period("M")
-    df["mk"]            = df[date_col].dt.to_period("M")
-    df = df.merge(macro_df.drop(columns=["date"]), on="mk", how="left").drop(columns=["mk"])
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    macro_df = macro_df.copy()
+    macro_df["date"] = pd.to_datetime(macro_df["date"], errors="coerce")
+
+    # Use as-of join so inference can use the latest available macro snapshot
+    # instead of defaulting to zeros when exact month values are missing.
+    df["asof_date"] = df[date_col].dt.to_period("M").dt.to_timestamp()
+    macro_df["asof_date"] = macro_df["date"].dt.to_period("M").dt.to_timestamp()
+
+    df = df.sort_values("asof_date")
+    macro_df = macro_df.sort_values("asof_date")
+
+    macro_cols = ["asof_date", *MACRO_COLS]
+    df = pd.merge_asof(
+        df,
+        macro_df[macro_cols],
+        on="asof_date",
+        direction="backward",
+    ).drop(columns=["asof_date"])
+
     for col in MACRO_COLS:
         if col not in df.columns: df[col] = 0.0
         df[col] = df[col].fillna(0)
