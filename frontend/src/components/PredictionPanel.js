@@ -8,6 +8,7 @@ const PredictionPanel = ({ ticker, tickerInfo }) => {
   const [modelType, setModelType]     = useState('ensemble');
   const [predictions, setPredictions] = useState([]);
   const [modelUsed, setModelUsed]     = useState('');
+  const [eventDate, setEventDate]     = useState(new Date().toISOString().slice(0, 10));
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState(null);
 
@@ -17,7 +18,7 @@ const PredictionPanel = ({ ticker, tickerInfo }) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiService.predict(ticker, lines, modelType);
+      const res = await apiService.predict(ticker, lines, modelType, eventDate);
       // ✅ API returns { results: [...], model_used: "..." }
       setPredictions(res.results || res.predictions || []);
       setModelUsed(res.model_used || modelType);
@@ -43,6 +44,15 @@ const PredictionPanel = ({ ticker, tickerInfo }) => {
             <option value="xgboost">XGBoost</option>
             <option value="lstm">LSTM</option>
           </select>
+        </div>
+
+        <div className="ctrl-group">
+          <label>Event Date</label>
+          <input
+            type="date"
+            value={eventDate}
+            onChange={(e) => setEventDate(e.target.value)}
+          />
         </div>
 
         <div className="ctrl-group full">
@@ -83,6 +93,7 @@ const PredictionPanel = ({ ticker, tickerInfo }) => {
                 <th>#</th>
                 <th>Headline</th>
                 <th>Prediction</th>
+                <th>Signal</th>
                 <th>Confidence</th>
               </tr>
             </thead>
@@ -100,6 +111,7 @@ const PredictionPanel = ({ ticker, tickerInfo }) => {
                         {isUp ? '📈 UP' : '📉 DOWN'}
                       </span>
                     </td>
+                    <td>{p.signal || (isUp ? 'BULLISH' : 'BEARISH')}</td>
                     <td>{typeof conf === 'number' ? conf.toFixed(1) : '—'}%</td>
                   </tr>
                 );

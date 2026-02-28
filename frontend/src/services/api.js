@@ -16,8 +16,8 @@ const apiService = {
   getTickers:      ()                              => api.get('/tickers'),
   getModels:       ()                              => api.get('/models'),
   getModelMetrics: ()                              => api.get('/models/metrics'),
-  predict:         (ticker, news_texts, model_type='ensemble') =>
-                     api.post('/predict', { ticker, news_texts, model_type }),
+  predict:         (ticker, news_texts, model_type='ensemble', event_date=null) =>
+                     api.post('/predict', { ticker, news_texts, model_type, event_date }),
 };
 
 export default apiService;
