@@ -30,6 +30,13 @@ htmlcov/
 .env
 .env.*
 
+backend/models/
+backend/data/
+
+# HuggingFace cache
+.cache/
+**/.cache/
+
 # =========================
 # 🔹 Node / React
 # =========================
