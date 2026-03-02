@@ -125,6 +125,22 @@ class Predictor:
     def models_loaded(self) -> bool:
         return self._loaded and (self._rf is not None or self._xgb is not None)
 
+    def macro_status(self) -> Dict[str, Any]:
+        """Expose macro-data health for API/system checks."""
+        if self._macro_df is None or self._macro_df.empty:
+            return {"available": False, "latest_date": None, "age_days": None}
+
+        macro_max = pd.to_datetime(self._macro_df["date"], errors="coerce").max()
+        if pd.isna(macro_max):
+            return {"available": False, "latest_date": None, "age_days": None}
+
+        age_days = (pd.Timestamp.utcnow().tz_localize(None) - macro_max).days
+        return {
+            "available": True,
+            "latest_date": str(macro_max.date()),
+            "age_days": int(age_days),
+        }
+
     def _extract_features(
         self,
         texts: List[str],
@@ -155,21 +171,30 @@ class Predictor:
         return get_feature_matrix(df_feat)
 
 
-    def _validate_macro_freshness(self, event_dates: List[str]) -> None:
+    def _validate_macro_freshness(self, event_dates: List[str]) -> Optional[str]:
         from src.config import MACRO_MAX_STALENESS_DAYS
         if self._macro_df is None or self._macro_df.empty:
             raise ValueError("Macro indicators are unavailable; cannot run thesis-grade inference.")
 
         macro_max = pd.to_datetime(self._macro_df["date"], errors="coerce").max()
+        max_gap = 0
+        farthest_event = None
         for d in event_dates:
             event_dt = pd.to_datetime(d, errors="coerce")
             if pd.isna(event_dt):
                 raise ValueError(f"Invalid event date: {d}")
             gap = (event_dt - macro_max).days
-            if gap > MACRO_MAX_STALENESS_DAYS:
-                raise ValueError(
-                    f"Macro data stale for event date {d}. Latest macro snapshot {macro_max.date()} is {gap} days old."
-                )
+            if gap > max_gap:
+                max_gap = gap
+                farthest_event = d
+
+        if max_gap > MACRO_MAX_STALENESS_DAYS:
+            return (
+                f"Macro data is stale for event date {farthest_event}. "
+                f"Latest macro snapshot {macro_max.date()} is {max_gap} days old; "
+                "falling back to latest available macro snapshot via as-of merge."
+            )
+        return None
 
     def predict(
         self,
@@ -182,7 +207,9 @@ class Predictor:
             raise RuntimeError("Models not loaded. Call .load() first.")
 
         dates_for_validation = event_dates or [datetime.utcnow().strftime("%Y-%m-%d")] * len(texts)
-        self._validate_macro_freshness(dates_for_validation)
+        macro_warning = self._validate_macro_freshness(dates_for_validation)
+        if macro_warning:
+            logger.warning(macro_warning)
         X = self._extract_features(texts, ticker, event_dates=event_dates)
         model_lower = model.lower()
 
@@ -210,6 +237,7 @@ class Predictor:
         return {
             "predictions":      [int(p) for p in predictions],
             "probabilities_up": [float(p) for p in probabilities_up],
+            "warning": macro_warning,
         }
 
     def predict_single(self, text: str, ticker: str = "") -> Dict[str, Any]:
