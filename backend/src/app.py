@@ -364,13 +364,16 @@ async def predict(request: PredictRequest):
             prob_up    = float(pred["probabilities_up"][0])
             direction  = "UP" if pred["predictions"][0] == 1 else "DOWN"
             confidence = round((prob_up if direction == "UP" else 1 - prob_up) * 100, 1)
+            model_warning = pred.get("warning")
+            mismatch_warning = _mismatch_warning(headline, request.ticker)
+            combined_warning = " | ".join(w for w in [model_warning, mismatch_warning] if w)
             results.append(HeadlineResult(
                 headline       = headline,
                 prediction     = direction,
                 signal         = _signal_from_probability(prob_up),
                 confidence     = confidence,
                 probability_up = round(prob_up, 4),
-                warning        = _mismatch_warning(headline, request.ticker),
+                warning        = combined_warning or None,
             ))
         except Exception as e:
             logger.error("Prediction error: %s", e)
