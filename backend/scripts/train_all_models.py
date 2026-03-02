@@ -23,7 +23,7 @@ import pandas as pd
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 
-from src.config import DATA_DIR, MODELS_DIR, ALLOW_SYNTHETIC_BY_DEFAULT
+from src.config import DATA_DIR, MODELS_DIR
 from src.data_contracts import validate_news_dataframe
 from src.features.feature_engineering import extract_all_features, get_feature_matrix
 from src.models.baseline import BaselineModel
@@ -80,12 +80,7 @@ def _split_data(df: pd.DataFrame, time_aware: bool) -> tuple[pd.DataFrame, pd.Da
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default=str(DATA_DIR / "raw_news_sample.csv"))
-    parser.add_argument(
-        "--allow-synthetic",
-        action="store_true",
-        default=ALLOW_SYNTHETIC_BY_DEFAULT,
-        help=("Allow synthetic/mixed data sources. Keep OFF for thesis final experiments."),
-    )
+    parser.add_argument("--allow-synthetic", action="store_true")
     parser.add_argument("--time-aware", action="store_true", help="Use chronological split (recommended for thesis)")
     args = parser.parse_args()
 
@@ -98,14 +93,7 @@ def main() -> None:
     df = pd.read_csv(data_path)
     if "data_source" not in df.columns:
         df["data_source"] = "synthetic"
-    try:
-        contract = validate_news_dataframe(df, allow_synthetic=args.allow_synthetic)
-    except ValueError as exc:
-        if "Synthetic data detected" in str(exc):
-            raise ValueError(
-                f"{exc}\nHint: rerun with --allow-synthetic for demo data, or switch --dataset to a real-news file."
-            ) from exc
-        raise
+    contract = validate_news_dataframe(df, allow_synthetic=args.allow_synthetic)
 
     print(f"Loaded {contract.rows} rows from {data_path}")
     print(f"Data sources: {', '.join(contract.sources)}")

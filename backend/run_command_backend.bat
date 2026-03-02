@@ -18,7 +18,7 @@ python ".\scripts\generate_sample_data.py"
 REM Demo mode: generated data is synthetic; pass --allow-synthetic to training.
 if errorlevel 1 pause & exit /b 1
 
-python ".\scripts\train_all_models.py" --allow-synthetic --time-aware
+python ".\scripts\train_all_models.py" --allow-synthetic
 if errorlevel 1 pause & exit /b 1
 
 python ".\scripts\evaluate_all_models.py"
