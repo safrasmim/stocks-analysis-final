@@ -155,21 +155,47 @@ class Predictor:
         return get_feature_matrix(df_feat)
 
 
-    def _validate_macro_freshness(self, event_dates: List[str]) -> None:
-        from src.config import MACRO_MAX_STALENESS_DAYS
+    def _validate_macro_freshness(self, event_dates: List[str]) -> List[str]:
+        from src.config import MACRO_MAX_STALENESS_DAYS, ALLOW_STALE_MACRO_FOR_DEMO
         if self._macro_df is None or self._macro_df.empty:
             raise ValueError("Macro indicators are unavailable; cannot run thesis-grade inference.")
 
         macro_max = pd.to_datetime(self._macro_df["date"], errors="coerce").max()
+        if pd.isna(macro_max):
+            raise ValueError("Macro indicators exist but latest date is invalid.")
+
+        normalized_dates: List[str] = []
         for d in event_dates:
             event_dt = pd.to_datetime(d, errors="coerce")
             if pd.isna(event_dt):
                 raise ValueError(f"Invalid event date: {d}")
             gap = (event_dt - macro_max).days
             if gap > MACRO_MAX_STALENESS_DAYS:
+                if ALLOW_STALE_MACRO_FOR_DEMO:
+                    logger.warning(
+                        "Macro stale for event date %s (%d days). Falling back to latest macro snapshot %s.",
+                        d, gap, macro_max.date(),
+                    )
+                    normalized_dates.append(macro_max.strftime("%Y-%m-%d"))
+                    continue
                 raise ValueError(
                     f"Macro data stale for event date {d}. Latest macro snapshot {macro_max.date()} is {gap} days old."
                 )
+            normalized_dates.append(event_dt.strftime("%Y-%m-%d"))
+        return normalized_dates
+
+    def macro_status(self) -> Dict[str, Any]:
+        if self._macro_df is None or self._macro_df.empty:
+            return {"available": False, "latest_date": None, "age_days": None}
+        macro_max = pd.to_datetime(self._macro_df["date"], errors="coerce").max()
+        if pd.isna(macro_max):
+            return {"available": False, "latest_date": None, "age_days": None}
+        age = (pd.Timestamp.utcnow().tz_localize(None) - macro_max).days
+        return {
+            "available": True,
+            "latest_date": macro_max.strftime("%Y-%m-%d"),
+            "age_days": int(age),
+        }
 
     def predict(
         self,
@@ -182,8 +208,8 @@ class Predictor:
             raise RuntimeError("Models not loaded. Call .load() first.")
 
         dates_for_validation = event_dates or [datetime.utcnow().strftime("%Y-%m-%d")] * len(texts)
-        self._validate_macro_freshness(dates_for_validation)
-        X = self._extract_features(texts, ticker, event_dates=event_dates)
+        normalized_dates = self._validate_macro_freshness(dates_for_validation)
+        X = self._extract_features(texts, ticker, event_dates=normalized_dates)
         model_lower = model.lower()
 
         if model_lower in ("ensemble", "auto"):

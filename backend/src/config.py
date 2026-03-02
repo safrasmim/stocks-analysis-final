@@ -207,6 +207,7 @@ CLASSIFICATION_METRICS = ["accuracy", "precision", "recall", "f1_score", "roc_au
 ALLOW_SYNTHETIC_BY_DEFAULT = False
 MACRO_MAX_STALENESS_DAYS   = 45
 REQUIRE_EVENT_DATE         = True
+ALLOW_STALE_MACRO_FOR_DEMO = True  # demo UX: fallback to latest macro snapshot when event date is newer
 
 # ── Sample data generation config ─────────────────────────────────────────────
 SAMPLE_DATA_CONFIG = {

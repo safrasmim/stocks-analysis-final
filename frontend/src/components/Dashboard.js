@@ -10,6 +10,7 @@ const Dashboard = () => {
   const [tickerMap, setTickerMap] = useState(TICKER_MAP);
   const [selectedTicker, setTicker] = useState('1120');
   const [modelMetrics, setMetrics] = useState(null);
+  const [macroInfo, setMacroInfo] = useState({ available: false, latest_date: null, age_days: null });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -18,12 +19,19 @@ const Dashboard = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const res = await apiService.getTickers();
-      const list = Object.entries(res.tickers || {}).map(([code, info]) => ({ code, ...info }));
+      const [tickersRes, healthRes] = await Promise.all([
+        apiService.getTickers(),
+        apiService.health(),
+      ]);
+
+      const list = Object.entries(tickersRes.tickers || {}).map(([code, info]) => ({ code, ...info }));
       if (list.length) {
         setTickers(list);
         setTickerMap(Object.fromEntries(list.map((t) => [t.code, t])));
       }
+
+      setMacroInfo(healthRes?.macro || { available: false, latest_date: null, age_days: null });
+
       const m = await apiService.getModelMetrics();
       setMetrics(m?.models || m?.metrics || m);
       setError(null);
@@ -68,12 +76,19 @@ const Dashboard = () => {
         <section className="kpi-grid">
           <article className="kpi-card"><h4>Coverage</h4><p>{tickers.length} Saudi stocks</p></article>
           <article className="kpi-card"><h4>Top Accuracy</h4><p>{(bestAcc * 100).toFixed(1)}%</p></article>
-          <article className="kpi-card"><h4>Feature Families</h4><p>Sentiment · Topics · Macro</p></article>
+          <article className="kpi-card"><h4>Macro Snapshot</h4><p>{macroInfo.latest_date || 'Unavailable'}</p></article>
         </section>
 
         {info && <section className="card company-card"><h3>{info.name}</h3><p>{info.sector} · {info.description}</p></section>}
 
-        <section className="card"><PredictionPanel ticker={selectedTicker} tickerInfo={info} /></section>
+        <section className="card">
+          <PredictionPanel
+            ticker={selectedTicker}
+            tickerInfo={info}
+            macroLatestDate={macroInfo.latest_date}
+            macroAgeDays={macroInfo.age_days}
+          />
+        </section>
         {modelMetrics && <section className="card"><h2>Model Benchmark Snapshot</h2><ModelComparison metrics={modelMetrics} /></section>}
       </main>
 

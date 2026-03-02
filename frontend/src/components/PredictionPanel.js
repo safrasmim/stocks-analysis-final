@@ -1,16 +1,20 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import apiService from '../services/api';
 import './PredictionPanel.css';
 
 const defaultHeadline = `Saudi inflation drops to 1.8% as food prices stabilize\nFederal Reserve signals potential rate cuts next quarter`;
 
-const PredictionPanel = ({ ticker, tickerInfo }) => {
+const PredictionPanel = ({ ticker, tickerInfo, macroLatestDate, macroAgeDays }) => {
   const [newsInput, setNewsInput] = useState(defaultHeadline);
   const [modelType, setModelType] = useState('ensemble');
   const [eventDate, setEventDate] = useState(new Date().toISOString().slice(0, 10));
   const [predictions, setPredictions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (macroLatestDate) setEventDate(macroLatestDate);
+  }, [macroLatestDate]);
 
   const handlePredict = async () => {
     const lines = newsInput.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -31,6 +35,12 @@ const PredictionPanel = ({ ticker, tickerInfo }) => {
       <div className="panel-head">
         <h2>Inference Console</h2>
         <p>{tickerInfo?.name || ticker} · Macro-news driven directional forecast</p>
+        {macroLatestDate && (
+          <p style={{ fontSize: '0.85rem', color: '#64748b' }}>
+            Using latest macro snapshot: <strong>{macroLatestDate}</strong>
+            {Number.isFinite(macroAgeDays) ? ` (${macroAgeDays} days old)` : ''}
+          </p>
+        )}
       </div>
 
       <div className="controls">
