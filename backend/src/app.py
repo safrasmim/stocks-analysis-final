@@ -42,6 +42,7 @@ from .config import (
     MODEL_DIR, MODELS_DIR, DATA_DIR,
     TICKERS, TICKER_NAMES,
     API_TITLE, API_VERSION, API_DESCRIPTION, CORS_ORIGINS,
+    REQUIRE_EVENT_DATE,
 )
 from .predictor import Predictor
 
@@ -341,6 +342,8 @@ async def predict(request: PredictRequest):
     texts = request.get_texts()
     if not texts:
         raise HTTPException(status_code=400, detail="Provide headlines or news_texts (non-empty list).")
+    if REQUIRE_EVENT_DATE and not (request.event_date or request.event_dates):
+        raise HTTPException(status_code=400, detail="event_date (or event_dates) is required for macro-aware inference.")
 
     model_name = request.get_model()
     event_dates = request.get_event_dates(len(texts))
@@ -400,7 +403,7 @@ async def predict_batch(request: BatchPredictRequest):
         if ticker not in TICKERS:
             continue
         try:
-            pred       = predictor.predict(texts=[request.headline], ticker=ticker, model="ensemble")
+            pred       = predictor.predict(texts=[request.headline], ticker=ticker, model="ensemble", event_dates=[datetime.utcnow().strftime("%Y-%m-%d")])
             prob_up    = float(pred["probabilities_up"][0])
             direction  = "UP" if pred["predictions"][0] == 1 else "DOWN"
             confidence = round((prob_up if direction == "UP" else 1 - prob_up) * 100, 1)
@@ -430,7 +433,7 @@ async def predict_broadcast(request: BroadcastRequest):
     all_results: List[BroadcastStockResult] = []
     for ticker, info in TICKERS.items():
         try:
-            pred       = predictor.predict(texts=[request.headline], ticker=ticker, model="ensemble")
+            pred       = predictor.predict(texts=[request.headline], ticker=ticker, model="ensemble", event_dates=[datetime.utcnow().strftime("%Y-%m-%d")])
             prob_up    = float(pred["probabilities_up"][0])
             direction  = "UP" if pred["predictions"][0] == 1 else "DOWN"
             confidence = round((prob_up if direction == "UP" else 1 - prob_up) * 100, 1)

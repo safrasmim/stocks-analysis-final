@@ -17,6 +17,7 @@ import numpy as np
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +154,23 @@ class Predictor:
         )
         return get_feature_matrix(df_feat)
 
+
+    def _validate_macro_freshness(self, event_dates: List[str]) -> None:
+        from src.config import MACRO_MAX_STALENESS_DAYS
+        if self._macro_df is None or self._macro_df.empty:
+            raise ValueError("Macro indicators are unavailable; cannot run thesis-grade inference.")
+
+        macro_max = pd.to_datetime(self._macro_df["date"], errors="coerce").max()
+        for d in event_dates:
+            event_dt = pd.to_datetime(d, errors="coerce")
+            if pd.isna(event_dt):
+                raise ValueError(f"Invalid event date: {d}")
+            gap = (event_dt - macro_max).days
+            if gap > MACRO_MAX_STALENESS_DAYS:
+                raise ValueError(
+                    f"Macro data stale for event date {d}. Latest macro snapshot {macro_max.date()} is {gap} days old."
+                )
+
     def predict(
         self,
         texts: List[str],
@@ -163,6 +181,8 @@ class Predictor:
         if not self.models_loaded():
             raise RuntimeError("Models not loaded. Call .load() first.")
 
+        dates_for_validation = event_dates or [datetime.utcnow().strftime("%Y-%m-%d")] * len(texts)
+        self._validate_macro_freshness(dates_for_validation)
         X = self._extract_features(texts, ticker, event_dates=event_dates)
         model_lower = model.lower()
 
