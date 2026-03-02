@@ -247,10 +247,12 @@ class BroadcastResponse(BaseModel):
 async def health():
     """System status and model readiness."""
     models_ready = predictor.models_loaded() if predictor else False
+    macro = predictor.macro_status() if predictor else {"available": False, "latest_date": None, "age_days": None}
     return {
         "status":        "ok" if models_ready else "degraded",
         "models_ready":  models_ready,
         "tickers_count": len(TICKERS),
+        "macro":         macro,
         "message":       "All systems operational." if models_ready
                          else "Models not loaded — run train_all_models.py",
     }

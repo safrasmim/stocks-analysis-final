@@ -30,3 +30,11 @@ python backend/scripts/run_ablation_study.py --dataset backend/data/raw_news_sam
 ```
 
 See `THESIS_ALIGNMENT_REMEDIATION.md` for thesis-readiness details.
+
+
+### Windows one-click demo
+Use:
+```bat
+backend\run_command_backend.bat
+```
+This script generates synthetic data and therefore trains with `--allow-synthetic --time-aware` automatically.
