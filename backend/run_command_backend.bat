@@ -17,7 +17,7 @@ if exist requirements.txt (
 python ".\scripts\generate_sample_data.py"
 if errorlevel 1 pause & exit /b 1
 
-python ".\scripts\train_all_models.py"
+python ".\scripts\train_all_models.py" --allow-synthetic
 if errorlevel 1 pause & exit /b 1
 
 python ".\scripts\evaluate_all_models.py"

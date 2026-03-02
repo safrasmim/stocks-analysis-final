@@ -32,6 +32,7 @@ htmlcov/
 
 backend/models/
 backend/data/
+/backend/data/
 
 # HuggingFace cache
 .cache/
