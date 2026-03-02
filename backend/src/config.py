@@ -202,6 +202,12 @@ LSTM_CONFIG = {
 # ── Evaluation metrics ─────────────────────────────────────────────────────────
 CLASSIFICATION_METRICS = ["accuracy", "precision", "recall", "f1_score", "roc_auc"]
 
+
+# ── Data governance / thesis-alignment guards ───────────────────────────────
+ALLOW_SYNTHETIC_BY_DEFAULT = False
+MACRO_MAX_STALENESS_DAYS   = 45
+REQUIRE_EVENT_DATE         = True
+
 # ── Sample data generation config ─────────────────────────────────────────────
 SAMPLE_DATA_CONFIG = {
     "num_articles_per_stock": 400,

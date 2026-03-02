@@ -5,13 +5,26 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+FALLBACK_STOPWORDS = {
+    "the", "and", "for", "with", "that", "this", "from", "have", "has", "was", "are", "will",
+    "said", "also", "would", "could", "one", "two", "may", "new", "into", "about", "after",
+}
+
+
 def preprocess_for_lda(texts: List[str]) -> List[List[str]]:
-    import re, nltk
-    try: nltk.data.find("corpora/stopwords")
-    except LookupError: nltk.download("stopwords", quiet=True)
-    from nltk.corpus import stopwords
-    stop = set(stopwords.words("english"))
-    stop.update(["said","also","would","could","one","two","may","new"])
+    import re
+    stop = set(FALLBACK_STOPWORDS)
+    try:
+        import nltk
+        try:
+            nltk.data.find("corpora/stopwords")
+        except LookupError:
+            nltk.download("stopwords", quiet=True)
+        from nltk.corpus import stopwords
+        stop.update(stopwords.words("english"))
+    except Exception as exc:
+        logger.warning("NLTK stopwords unavailable (%s). Using fallback stopword list.", exc)
+
     result = []
     for text in texts:
         text = re.sub(r"[^a-zA-Z\s]", " ", str(text).lower())
@@ -19,10 +32,12 @@ def preprocess_for_lda(texts: List[str]) -> List[List[str]]:
         result.append(tokens)
     return result
 
+
 def train_lda(texts: List[str], num_topics: int = 10, passes: int = 10, save_path: Optional[Path] = None):
     from gensim import corpora
     from gensim.models import LdaModel
-    processed  = preprocess_for_lda(texts)
+
+    processed = preprocess_for_lda(texts)
     dictionary = corpora.Dictionary(processed)
     dictionary.filter_extremes(no_below=2, no_above=0.95)
     corpus = [dictionary.doc2bow(doc) for doc in processed]
@@ -33,18 +48,26 @@ def train_lda(texts: List[str], num_topics: int = 10, passes: int = 10, save_pat
         dictionary.save(str(save_path / "lda_dictionary"))
     return lda, dictionary
 
-def extract_topic_features(texts: List[str], lda_model=None, dictionary=None,
-                            num_topics: int = 10, model_dir: Optional[Path] = None) -> pd.DataFrame:
+
+def extract_topic_features(
+    texts: List[str],
+    lda_model=None,
+    dictionary=None,
+    num_topics: int = 10,
+    model_dir: Optional[Path] = None,
+) -> pd.DataFrame:
     from gensim.models import LdaModel
     from gensim import corpora
+
     if lda_model is None and model_dir is not None:
         try:
-            lda_model  = LdaModel.load(str(model_dir / "lda_model"))
+            lda_model = LdaModel.load(str(model_dir / "lda_model"))
             dictionary = corpora.Dictionary.load(str(model_dir / "lda_dictionary"))
-        except:
+        except Exception:
             lda_model, dictionary = train_lda(texts, num_topics)
     elif lda_model is None:
         lda_model, dictionary = train_lda(texts, num_topics)
+
     processed = preprocess_for_lda(texts)
     rows = []
     for doc in processed:

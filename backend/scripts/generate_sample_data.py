@@ -182,7 +182,7 @@ def generate_sample_data():
         pool    = BULLISH if label == 1 else BEARISH
         text    = fmt(random.choice(pool), company)
         rows.append({"ticker": ticker, "text": text,
-                     "date": date.strftime("%Y-%m-%d"), "label": label})
+                     "date": date.strftime("%Y-%m-%d"), "label": label, "data_source": "synthetic"})
 
     # 2. Macro / market-wide news (400 samples)
     for _ in range(400):
@@ -192,7 +192,7 @@ def generate_sample_data():
         pool   = MACRO_BULLISH if label == 1 else MACRO_BEARISH
         text   = fmt(random.choice(pool))
         rows.append({"ticker": ticker, "text": text,
-                     "date": date.strftime("%Y-%m-%d"), "label": label})
+                     "date": date.strftime("%Y-%m-%d"), "label": label, "data_source": "synthetic"})
 
     # 3. Ambiguous / neutral samples (200 samples, random labels)
     for _ in range(200):
@@ -202,10 +202,10 @@ def generate_sample_data():
         date    = random.choice(dates)
         text    = fmt(random.choice(AMBIGUOUS), company)
         rows.append({"ticker": ticker, "text": text,
-                     "date": date.strftime("%Y-%m-%d"), "label": label})
+                     "date": date.strftime("%Y-%m-%d"), "label": label, "data_source": "synthetic"})
 
     # 4. Apply 12% label noise to simulate real-world uncertainty
-    df        = pd.DataFrame(rows)
+    df        = pd.DataFrame(rows).drop_duplicates(subset=["date", "ticker", "text"]).reset_index(drop=True)
     noise_idx = df.sample(frac=0.12, random_state=99).index
     df.loc[noise_idx, "label"] = 1 - df.loc[noise_idx, "label"]
 
