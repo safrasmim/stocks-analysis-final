@@ -32,11 +32,13 @@ import csv
 import json
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
+
+import pandas as pd
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .config import (
     MODEL_DIR, MODELS_DIR, DATA_DIR,
@@ -45,6 +47,25 @@ from .config import (
     REQUIRE_EVENT_DATE,
 )
 from .predictor import Predictor
+from .ingestion.mubasher_tdwl import (
+    MubasherRequestConfig,
+    REQUEST_TYPE_ANNOUNCEMENT,
+    REQUEST_TYPE_NEWS,
+    build_mix2_url,
+    compute_latest_cursor,
+    fetch_mix2_json,
+    filter_items_newer_than_cursor,
+    load_cursor,
+    parse_mix2_items,
+    save_cursor,
+    upsert_incremental_items,
+)
+from .services.news_signal import (
+    aggregate_directional_signal,
+    build_prediction_rows,
+    load_ingested_items,
+    select_recent_items,
+)
 
 logging.basicConfig(
     level  = logging.INFO,
@@ -236,6 +257,46 @@ class BroadcastResponse(BaseModel):
     by_sector:    Dict[str, List[BroadcastStockResult]]
     most_bullish: List[BroadcastStockResult]
     most_bearish: List[BroadcastStockResult]
+
+
+class IngestionRunRequest(BaseModel):
+    tickers: Optional[List[str]] = None
+    sid: str = "sid"
+    uid: str = "123"
+    language: str = "EN"
+    output_path: Optional[str] = None
+    cursor_path: Optional[str] = None
+    extra_params: Dict[str, str] = Field(default_factory=dict)
+
+
+class IngestionRunResponse(BaseModel):
+    status: str
+    records_added: int
+    records_total: int
+    output_path: str
+    cursor_path: str
+
+
+class LiveTickerSignalRequest(BaseModel):
+    ticker: str
+    model: str = "ensemble"
+    as_of: Optional[str] = None
+    lookback_days: int = 3
+    max_items: int = 50
+    macro_regime_score: float = 0.0
+    ingestion_path: Optional[str] = None
+
+
+class LiveTickerSignalResponse(BaseModel):
+    ticker: str
+    company: str
+    as_of: str
+    signal: str
+    probability_up: float
+    score: float
+    items_used: int
+    components: Dict[str, Any]
+    items: List[Dict[str, Any]]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -466,4 +527,85 @@ async def predict_broadcast(request: BroadcastRequest):
         by_sector    = by_sector,
         most_bearish = all_results[:5],
         most_bullish = list(reversed(all_results[-5:])),
+    )
+
+
+@app.post("/ingestion/tdwl/run", response_model=IngestionRunResponse, tags=["Ingestion"])
+async def run_tdwl_ingestion(request: IngestionRunRequest):
+    """Run TDWL ingestion in-process and persist only records newer than cursor."""
+    tickers = set(request.tickers or list(TICKERS.keys()))
+    unknown = sorted(tickers - set(TICKERS.keys()))
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown ticker(s): {', '.join(unknown)}")
+
+    output_path = Path(request.output_path) if request.output_path else (DATA_DIR / "ingested" / "tdwl_news_announcements.parquet")
+    cursor_path = Path(request.cursor_path) if request.cursor_path else (DATA_DIR / "ingested" / "tdwl_news_announcements.cursor.json")
+
+    config = MubasherRequestConfig(sid=request.sid, uid=request.uid, language=request.language)
+    cursor = load_cursor(cursor_path)
+
+    new_items = []
+    for item_type, rt in (("announcement", REQUEST_TYPE_ANNOUNCEMENT), ("news", REQUEST_TYPE_NEWS)):
+        url = build_mix2_url(rt=rt, config=config, extra_params=request.extra_params)
+        payload = fetch_mix2_json(url)
+        parsed = parse_mix2_items(payload, item_type=item_type, allowed_tickers=tickers)
+        new_items.extend(filter_items_newer_than_cursor(parsed, cursor=cursor))
+
+    before = len(load_ingested_items(output_path))
+    merged = upsert_incremental_items(new_items, store_path=output_path)
+    save_cursor(compute_latest_cursor(merged), cursor_path)
+
+    return IngestionRunResponse(
+        status="ok",
+        records_added=max(len(merged) - before, 0),
+        records_total=len(merged),
+        output_path=str(output_path),
+        cursor_path=str(cursor_path),
+    )
+
+
+@app.post("/predict/ticker/live", response_model=LiveTickerSignalResponse, tags=["Prediction"])
+async def predict_live_ticker_signal(request: LiveTickerSignalRequest):
+    """Aggregate latest ticker news+announcements into a single thesis-aligned signal."""
+    if not predictor or not predictor.models_loaded():
+        raise HTTPException(status_code=503, detail="Models not loaded.")
+    if request.ticker not in TICKERS:
+        raise HTTPException(status_code=400, detail=f"Unknown ticker '{request.ticker}'.")
+
+    as_of = pd.to_datetime(request.as_of, utc=True).to_pydatetime() if request.as_of else datetime.now(timezone.utc)
+    ingestion_path = Path(request.ingestion_path) if request.ingestion_path else (DATA_DIR / "ingested" / "tdwl_news_announcements.parquet")
+
+    frame = load_ingested_items(ingestion_path)
+    recent = select_recent_items(
+        frame,
+        ticker=request.ticker,
+        as_of=as_of,
+        lookback_days=max(request.lookback_days, 1),
+        max_items=max(request.max_items, 1),
+    )
+    prediction_rows = build_prediction_rows(
+        frame=recent,
+        predictor=predictor,
+        ticker=request.ticker,
+        model=request.model,
+    ) if not recent.empty else []
+
+    aggregate = aggregate_directional_signal(
+        prediction_rows,
+        as_of=as_of,
+        macro_regime_score=request.macro_regime_score,
+    )
+    if not aggregate.ticker:
+        aggregate.ticker = request.ticker
+
+    return LiveTickerSignalResponse(
+        ticker=request.ticker,
+        company=TICKER_NAMES.get(request.ticker, request.ticker),
+        as_of=aggregate.as_of,
+        signal=aggregate.signal,
+        probability_up=aggregate.probability_up,
+        score=aggregate.score,
+        items_used=aggregate.item_count,
+        components=aggregate.components,
+        items=prediction_rows,
     )
