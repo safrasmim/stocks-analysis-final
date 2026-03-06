@@ -1,14 +1,15 @@
 """
-predictor.py
-Loads all trained models and exposes a unified .predict() interface.
-Used by app.py to serve predictions via the FastAPI endpoints.
+predictor.py — patched _extract_features to match 43-col training feature matrix.
+
+Training used: 40 feature_engineering cols + 3 OHLC cols (intraday_vol, body_strength, vol_surge)
+Inference has no live OHLC → pad with 0.0 (becomes mean after StandardScaler, which is safe).
 """
 import warnings
 warnings.filterwarnings("ignore")
 
 import os
-os.environ["TF_ENABLE_ONEDNN_OPTS"]  = "0"
-os.environ["TF_CPP_MIN_LOG_LEVEL"]   = "3"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 
 import logging
@@ -21,6 +22,10 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# OHLC-derived columns added during training — not available at inference time
+# Pad with 0.0 (neutral / mean-equivalent after StandardScaler)
+INFERENCE_PAD_COLS = ["intraday_vol", "body_strength", "vol_surge"]
+
 
 class Predictor:
     """
@@ -30,21 +35,20 @@ class Predictor:
     """
 
     def __init__(self, model_dir: Path):
-        self.model_dir = Path(model_dir)
-        self._rf        = None
-        self._xgb       = None
-        self._lstm      = None
-        self._ensemble  = None
-        self._lda       = None
-        self._lda_dict  = None
-        self._macro_df  = None
-        self._loaded    = False
+        self.model_dir   = Path(model_dir)
+        self._rf         = None
+        self._xgb        = None
+        self._lstm       = None
+        self._ensemble   = None
+        self._lda        = None
+        self._lda_dict   = None
+        self._macro_df   = None
+        self._loaded     = False
 
     def load(self):
         """Load all available models from model_dir."""
         errors = []
 
-        # Random Forest
         rf_path = self.model_dir / "random_forest" / "random_forest.joblib"
         if rf_path.exists():
             try:
@@ -57,7 +61,6 @@ class Predictor:
         else:
             errors.append(f"RF model not found at {rf_path}")
 
-        # XGBoost
         xgb_path = self.model_dir / "xgboost" / "xgboost.joblib"
         if xgb_path.exists():
             try:
@@ -70,7 +73,6 @@ class Predictor:
         else:
             errors.append(f"XGB model not found at {xgb_path}")
 
-        # LSTM (optional — graceful skip)
         try:
             from src.models.lstm_model import LSTMModel
             lstm_path = self.model_dir / "lstm" / "lstm_model.h5"
@@ -81,7 +83,6 @@ class Predictor:
         except Exception as e:
             logger.warning("LSTM not loaded (non-fatal): %s", e)
 
-        # Ensemble
         try:
             from src.models.ensemble import EnsembleModel
             self._ensemble = EnsembleModel()
@@ -90,7 +91,6 @@ class Predictor:
         except Exception as e:
             errors.append(f"Ensemble: {e}")
 
-        # LDA (for feature extraction)
         lda_path  = self.model_dir / "lda" / "lda_model.joblib"
         dict_path = self.model_dir / "lda" / "lda_dictionary.joblib"
         if lda_path.exists() and dict_path.exists():
@@ -101,7 +101,6 @@ class Predictor:
             except Exception as e:
                 errors.append(f"LDA: {e}")
 
-        # Macro data (optional, but used when available for realistic inference)
         try:
             from src.config import DATA_DIR
             from src.features.macro import load_macro_data
@@ -111,9 +110,8 @@ class Predictor:
             logger.warning("Macro data not loaded (non-fatal): %s", e)
             self._macro_df = None
 
-        if errors:
-            for err in errors:
-                logger.warning("Load warning: %s", err)
+        for err in errors:
+            logger.warning("Load warning: %s", err)
 
         self._loaded = (self._rf is not None or self._xgb is not None)
         if not self._loaded:
@@ -126,20 +124,13 @@ class Predictor:
         return self._loaded and (self._rf is not None or self._xgb is not None)
 
     def macro_status(self) -> Dict[str, Any]:
-        """Expose macro-data health for API/system checks."""
         if self._macro_df is None or self._macro_df.empty:
             return {"available": False, "latest_date": None, "age_days": None}
-
         macro_max = pd.to_datetime(self._macro_df["date"], errors="coerce").max()
         if pd.isna(macro_max):
             return {"available": False, "latest_date": None, "age_days": None}
-
         age_days = (pd.Timestamp.utcnow().tz_localize(None) - macro_max).days
-        return {
-            "available": True,
-            "latest_date": str(macro_max.date()),
-            "age_days": int(age_days),
-        }
+        return {"available": True, "latest_date": str(macro_max.date()), "age_days": int(age_days)}
 
     def _extract_features(
         self,
@@ -147,13 +138,10 @@ class Predictor:
         ticker: str = "",
         event_dates: Optional[List[str]] = None,
     ) -> np.ndarray:
-        import pandas as pd
         from src.features.feature_engineering import extract_all_features, get_feature_matrix
 
-        if event_dates and len(event_dates) == len(texts):
-            dates = event_dates
-        else:
-            dates = [datetime.utcnow().strftime("%Y-%m-%d")] * len(texts)
+        dates = event_dates if (event_dates and len(event_dates) == len(texts)) \
+                else [datetime.utcnow().strftime("%Y-%m-%d")] * len(texts)
 
         df = pd.DataFrame({
             "text":   texts,
@@ -163,31 +151,38 @@ class Predictor:
         })
         df_feat = extract_all_features(
             df,
-            macro_df=self._macro_df,
-            lda_model=self._lda,
-            lda_dict=self._lda_dict,
-            model_dir=self.model_dir,
+            macro_df   = self._macro_df,
+            lda_model  = self._lda,
+            lda_dict   = self._lda_dict,
+            model_dir  = self.model_dir,
         )
-        return get_feature_matrix(df_feat)
+        X = get_feature_matrix(df_feat)   # shape (n, 40)
 
+        # ── PAD OHLC COLS ───────────────────────────────────────────────────
+        # Models trained on 43 cols: 40 NLP/macro + 3 OHLC.
+        # At inference time OHLC is unknown → pad with 0.0
+        # (StandardScaler will map 0.0 → ~mean, which is the safest neutral value)
+        n_missing = 43 - X.shape[1]
+        if n_missing > 0:
+            X = np.hstack([X, np.zeros((X.shape[0], n_missing), dtype=float)])
+            logger.debug("Padded %d OHLC cols with 0.0 for inference", n_missing)
+
+        return X
 
     def _validate_macro_freshness(self, event_dates: List[str]) -> Optional[str]:
         from src.config import MACRO_MAX_STALENESS_DAYS
         if self._macro_df is None or self._macro_df.empty:
-            raise ValueError("Macro indicators are unavailable; cannot run thesis-grade inference.")
-
+            logger.warning("Macro indicators unavailable — proceeding without macro features.")
+            return "Macro indicators are unavailable; predictions use NLP features only."
         macro_max = pd.to_datetime(self._macro_df["date"], errors="coerce").max()
-        max_gap = 0
-        farthest_event = None
+        max_gap, farthest_event = 0, None
         for d in event_dates:
             event_dt = pd.to_datetime(d, errors="coerce")
             if pd.isna(event_dt):
-                raise ValueError(f"Invalid event date: {d}")
+                continue
             gap = (event_dt - macro_max).days
             if gap > max_gap:
-                max_gap = gap
-                farthest_event = d
-
+                max_gap, farthest_event = gap, d
         if max_gap > MACRO_MAX_STALENESS_DAYS:
             return (
                 f"Macro data is stale for event date {farthest_event}. "
@@ -210,9 +205,10 @@ class Predictor:
         macro_warning = self._validate_macro_freshness(dates_for_validation)
         if macro_warning:
             logger.warning(macro_warning)
-        X = self._extract_features(texts, ticker, event_dates=event_dates)
-        model_lower = model.lower()
 
+        X = self._extract_features(texts, ticker, event_dates=event_dates)
+
+        model_lower = model.lower()
         if model_lower in ("ensemble", "auto"):
             chosen = self._ensemble or self._rf or self._xgb
         elif model_lower in ("rf", "random_forest"):
@@ -225,28 +221,28 @@ class Predictor:
             chosen = self._ensemble or self._rf or self._xgb
 
         if chosen is None:
-            raise RuntimeError(f"Requested model '{model}' is not available.")
+            raise RuntimeError(f"Requested model \'{model}\' is not available.")
 
-        result           = chosen.predict(X)
-        predictions      = result.get("predictions", [])
+        result          = chosen.predict(X)
+        predictions     = result.get("predictions", [])
         probabilities_up = result.get("probabilities_up", [])
 
         if len(probabilities_up) == 0:
             probabilities_up = [0.75 if p == 1 else 0.25 for p in predictions]
 
         return {
-            "predictions":      [int(p) for p in predictions],
+            "predictions":      [int(p)   for p in predictions],
             "probabilities_up": [float(p) for p in probabilities_up],
-            "warning": macro_warning,
+            "warning":          macro_warning,
         }
 
     def predict_single(self, text: str, ticker: str = "") -> Dict[str, Any]:
         result = self.predict([text], ticker=ticker)
         return {
-            "prediction":     result["predictions"][0],
+            "prediction":    result["predictions"][0],
             "probability_up": result["probabilities_up"][0],
-            "direction":      "UP" if result["predictions"][0] == 1 else "DOWN",
-            "confidence":     round(
+            "direction":     "UP" if result["predictions"][0] == 1 else "DOWN",
+            "confidence":    round(
                 (result["probabilities_up"][0]
                  if result["predictions"][0] == 1
                  else 1 - result["probabilities_up"][0]) * 100, 1

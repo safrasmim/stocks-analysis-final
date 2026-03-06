@@ -52,6 +52,8 @@ plotly==5.18.0
 kaleido==0.2.1
 tqdm==4.66.1
 
+pyarrow>=14.0.0
+
 # ========================
 # PyTorch (install separately due to Windows wheel index)
 # pip install torch==2.1.2 --index-url https://download.pytorch.org/whl/cpu

@@ -1,9 +1,11 @@
 """
-LSTM Model - Fixed for single-sample prediction
+lstm_model.py — adds class_weight="balanced" to model.fit()
+to prevent LSTM collapsing to all-DOWN on imbalanced data.
 """
 import numpy as np
 from pathlib import Path
 from sklearn.preprocessing import StandardScaler
+from sklearn.utils.class_weight import compute_class_weight
 import logging
 
 logger = logging.getLogger(__name__)
@@ -42,8 +44,7 @@ class LSTMModel:
         Xs, ys = [], []
         for i in range(self.sequence_length, len(X)):
             Xs.append(X[i - self.sequence_length:i])
-            if y is not None:
-                ys.append(y[i])
+            if y is not None: ys.append(y[i])
         if not Xs:
             empty = np.array([]).reshape(0, self.sequence_length, X.shape[1])
             return (empty, np.array([])) if y is not None else empty
@@ -51,6 +52,15 @@ class LSTMModel:
 
     def train(self, X_train, y_train, X_val=None, y_val=None):
         from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+        import tensorflow as tf
+        tf.random.set_seed(42)
+
+        # ── FIX: compute class weights to prevent collapse ──
+        classes = np.unique(y_train)
+        weights = compute_class_weight("balanced", classes=classes, y=y_train)
+        cw = dict(zip(classes.tolist(), weights.tolist()))
+        logger.info("LSTM class_weight: %s", cw)
+
         Xs = self.scaler.fit_transform(X_train)
         X_seq, y_seq = self._make_sequences(Xs, y_train)
         if len(X_seq) == 0:
@@ -63,38 +73,40 @@ class LSTMModel:
             Xv_seq, yv_seq = self._make_sequences(Xv, y_val)
             if len(Xv_seq) > 0:
                 val_data = (Xv_seq, yv_seq)
+        # Re-compute class_weight for the sequence-reduced y_seq
+        seq_classes = np.unique(y_seq)
+        if len(seq_classes) > 1:
+            seq_weights = compute_class_weight("balanced", classes=seq_classes, y=y_seq)
+            cw_seq = dict(zip(seq_classes.tolist(), seq_weights.tolist()))
+        else:
+            cw_seq = cw
         self.model.fit(
             X_seq, y_seq,
             epochs=self.epochs, batch_size=self.batch_size,
             validation_data=val_data,
+            class_weight=cw_seq,   # ← THE KEY FIX
             callbacks=[
-                EarlyStopping(patience=self.patience, restore_best_weights=True),
-                ReduceLROnPlateau(patience=5, factor=0.5),
+                EarlyStopping(patience=self.patience, restore_best_weights=True, monitor="val_loss"),
+                ReduceLROnPlateau(patience=5, factor=0.5, monitor="val_loss"),
             ],
             verbose=0,
         )
         self.is_trained = True
-        logger.info("LSTM training complete")
+        logger.info("LSTM training complete (class_weight applied)")
 
     def predict(self, X):
         n  = len(X)
         Xs = self.scaler.transform(X)
-
-        # Tile rows to fill sequence window for small inputs
         if n < self.sequence_length:
-            repeats = int(np.ceil(self.sequence_length / n))
-            Xs_full = np.tile(Xs, (repeats, 1))[:self.sequence_length]
-            X_seq   = Xs_full[np.newaxis, :, :]
-            prob    = float(self.model.predict(X_seq, verbose=0)[0, 0])
-            return {
-                "predictions":      np.array([int(prob >= 0.5)] * n),
-                "probabilities_up": np.array([prob] * n),
-            }
-
+            repeats  = int(np.ceil(self.sequence_length / n))
+            Xs_full  = np.tile(Xs, (repeats, 1))[:self.sequence_length]
+            X_seq    = Xs_full[np.newaxis, :, :]
+            prob     = float(self.model.predict(X_seq, verbose=0)[0, 0])
+            return {"predictions": np.array([int(prob >= 0.5)] * n),
+                    "probabilities_up": np.array([prob] * n)}
         X_seq = self._make_sequences(Xs)
         if len(X_seq) == 0:
-            return {"predictions": np.zeros(n, int),
-                    "probabilities_up": np.full(n, 0.5)}
+            return {"predictions": np.zeros(n, int), "probabilities_up": np.full(n, 0.5)}
         probs = self.model.predict(X_seq, verbose=0).flatten()
         preds = (probs >= 0.5).astype(int)
         pad   = n - len(probs)
@@ -112,6 +124,6 @@ class LSTMModel:
     def load(self, path: Path):
         import joblib
         from tensorflow.keras.models import load_model
-        self.model      = load_model(str(path / "lstm_model.h5"))
-        self.scaler     = joblib.load(path / "lstm_scaler.joblib")
+        self.model  = load_model(str(path / "lstm_model.h5"))
+        self.scaler = joblib.load(path / "lstm_scaler.joblib")
         self.is_trained = True

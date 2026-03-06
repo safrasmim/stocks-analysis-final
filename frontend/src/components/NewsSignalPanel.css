@@ -1,0 +1,32 @@
+.nsp-wrap { display: grid; gap: .9rem; }
+.nsp-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: .5rem; }
+.nsp-title  { font-size: 1.15rem; font-weight: 700; margin: 0; }
+.nsp-sub    { color: #607087; font-size: .87rem; margin: .2rem 0 0; }
+.nsp-refresh-btn { background: #1d4ed8; color: #fff; border: none; border-radius: 8px; padding: .45rem .9rem; cursor: pointer; font-size: .87rem; }
+.nsp-refresh-btn:disabled { opacity: .6; cursor: not-allowed; }
+.nsp-error { background: #fff4f4; border: 1px solid #f6b2b2; color: #8f2f2f; border-radius: 8px; padding: .6rem .9rem; font-size: .9rem; }
+.nsp-signal-card { border: 2px solid; border-radius: 12px; padding: 1rem; display: grid; gap: .65rem; }
+.nsp-signal-main { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.nsp-signal-icon  { font-size: 1.6rem; line-height: 1; }
+.nsp-signal-label { font-size: 1.4rem; font-weight: 800; }
+.nsp-signal-score { font-family: monospace; font-size: .9rem; background: rgba(0,0,0,.07); border-radius: 6px; padding: .2rem .5rem; }
+.nsp-signal-conf  { font-size: .85rem; opacity: .75; }
+.nsp-dampener-warn { background: rgba(239,68,68,.12); border-left: 4px solid #ef4444; padding: .4rem .7rem; border-radius: 0 6px 6px 0; font-size: .85rem; color: #7f1d1d; }
+.nsp-explanation  { font-size: .85rem; color: #334155; line-height: 1.55; margin: 0; }
+.nsp-metrics { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+.nsp-metric  { display: flex; flex-direction: column; }
+.nsp-metric span   { font-size: .75rem; color: #607087; }
+.nsp-metric strong { font-size: 1rem; }
+.nsp-section { display: grid; gap: 0; }
+.nsp-section-title { font-size: .9rem; font-weight: 700; color: #334155; margin: 0 0 .4rem; }
+.nsp-driver-row, .nsp-headline-row { display: flex; align-items: center; gap: .5rem; padding: .4rem 0; border-bottom: 1px solid #f1f5f9; flex-wrap: wrap; }
+.nsp-cat-badge { font-size: .7rem; padding: .15rem .4rem; border-radius: 999px; font-weight: 600; white-space: nowrap; }
+.nsp-dir { font-size: 1rem; width: 1rem; text-align: center; flex-shrink: 0; }
+.nsp-dir.up      { color: #059669; }
+.nsp-dir.down    { color: #dc2626; }
+.nsp-dir.neutral { color: #9ca3af; }
+.nsp-driver-text, .nsp-headline-text { flex: 1; font-size: .85rem; min-width: 0; }
+.nsp-weight { font-size: .75rem; color: #9ca3af; font-family: monospace; }
+.nsp-headline-type { font-size: .7rem; background: #e2e8f0; padding: .1rem .3rem; border-radius: 4px; color: #475569; }
+.nsp-headline-dt   { font-size: .75rem; color: #9ca3af; white-space: nowrap; }
+.nsp-last-refresh  { font-size: .75rem; color: #9ca3af; text-align: right; margin: 0; }
